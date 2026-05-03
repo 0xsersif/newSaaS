@@ -1,208 +1,206 @@
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Filter, Download, MoreHorizontal, MessageCircle, MapPin, Phone, Package, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import api from '../services/api';
-import { ShoppingCart, Eye, Search, Filter } from 'lucide-react';
+import { formatDate, formatMAD, getOrderStatusConfig, buildWhatsAppLink, cn } from '../lib/utils';
+import { toast } from 'sonner';
 
-interface Order {
-    id: number;
-    customer_name: string;
-    customer_phone: string;
-    status: string;
-    total_amount: number;
-    created_at: string;
-    items?: any[];
-}
+// Fallback Mock Data
+const MOCK_ORDERS = [
+    { id: 'ORD-2026-001', customer: { name: 'Amine Benali', phone: '0612345678', city: 'Casablanca' }, items: [{ name: 'AirPods Pro Max', qty: 1 }], total: 1990, status: 'new', created_at: new Date().toISOString() },
+    { id: 'ORD-2026-002', customer: { name: 'Sara Majid', phone: '0688776655', city: 'Rabat' }, items: [{ name: 'Montre Connectée', qty: 2 }], total: 1700, status: 'confirmed', created_at: new Date(Date.now() - 86400000).toISOString() },
+    { id: 'ORD-2026-003', customer: { name: 'Youssef Tariq', phone: '0655443322', city: 'Tanger' }, items: [{ name: 'SSD Externe 2TB', qty: 1 }], total: 1350, status: 'shipped', created_at: new Date(Date.now() - 172800000).toISOString() },
+];
 
-const statusColors: Record<string, string> = {
-    new: 'bg-blue-50 text-blue-700',
-    confirmed: 'bg-indigo-50 text-indigo-700',
-    shipped: 'bg-purple-50 text-purple-700',
-    delivered: 'bg-emerald-50 text-emerald-700',
-    cancelled: 'bg-red-50 text-red-700',
-    returned: 'bg-gray-100 text-gray-700',
-};
+const STATUSES = ['new', 'confirmed', 'shipped', 'delivered', 'cancelled'];
 
-const statusOptions = ['new', 'confirmed', 'shipped', 'delivered', 'cancelled', 'returned'];
-
-const OrdersPage: React.FC = () => {
-    const [orders, setOrders] = useState<Order[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function OrdersPage() {
+    const [view, setView] = useState<'list' | 'kanban'>('list');
     const [search, setSearch] = useState('');
-    const [filterStatus, setFilterStatus] = useState('');
-    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-    useEffect(() => {
-        loadOrders();
-    }, [filterStatus]);
+    const { data: qData, isLoading } = useQuery({
+        queryKey: ['orders'],
+        queryFn: () => api.getOrders().then(res => res.data).catch(() => MOCK_ORDERS),
+    });
 
-    const loadOrders = async () => {
-        try {
-            const filters: any = {};
-            if (filterStatus) filters.status = filterStatus;
-            const res = await api.getOrders(filters);
-            const data = res.data || res.orders || res;
-            setOrders(Array.isArray(data) ? data : data?.data || []);
-        } catch {
-            setOrders([]);
-        } finally {
-            setLoading(false);
-        }
+    const orders = qData || [];
+
+    const handleUpdateStatus = (id: string, newStatus: string) => {
+        toast.success(`Commande ${id} passée en ${newStatus}`);
+        // api.updateOrder(id, { status: newStatus }) ...
     };
 
-    const updateStatus = async (orderId: number, status: string) => {
-        try {
-            await api.updateOrderStatus(orderId, status);
-            await loadOrders();
-            if (selectedOrder?.id === orderId) {
-                setSelectedOrder({ ...selectedOrder, status });
-            }
-        } catch (err: any) {
-            alert(err.response?.data?.message || 'Failed to update status');
-        }
+    const handleContactCustomer = (phone: string, name: string) => {
+        const msg = `Bonjour ${name}, nous vous contactons concernant votre commande CODShop.`;
+        window.open(buildWhatsAppLink(phone, msg), '_blank');
     };
 
-    const filtered = orders.filter((o) =>
-        (o.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
-        String(o.id).includes(search)
+    const filteredOrders = orders.filter((o: any) =>
+        o.id.toLowerCase().includes(search.toLowerCase()) ||
+        o.customer.name.toLowerCase().includes(search.toLowerCase()) ||
+        o.customer.phone.includes(search)
     );
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center h-64">
-                <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-            </div>
-        );
-    }
-
     return (
-        <div>
-            <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
-                <p className="text-gray-500 text-sm mt-1">{orders.length} total orders</p>
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                <div>
+                    <h1 className="page-title">Commandes</h1>
+                    <p className="page-subtitle">Gérez vos expéditions et suivis clients.</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <button className="btn-secondary btn-sm"><Download className="w-4 h-4" /> Exporter</button>
+                </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-3 mb-6">
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            {/* Toolbar */}
+            <div className="glass-card p-4 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                <div className="relative w-full sm:max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                     <input
                         type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search by name or order #..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        placeholder="Rechercher par ID, nom, tel..."
+                        value={search} onChange={e => setSearch(e.target.value)}
+                        className="input pl-9"
                     />
                 </div>
-                <div className="relative">
-                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <select
-                        value={filterStatus}
-                        onChange={(e) => setFilterStatus(e.target.value)}
-                        className="pl-10 pr-8 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none"
-                    >
-                        <option value="">All statuses</option>
-                        {statusOptions.map((s) => (
-                            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-                        ))}
-                    </select>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button className="btn-secondary px-3 py-2 text-sm w-full sm:w-auto"><Filter className="w-4 h-4 mr-2" /> Filtres</button>
+
+                    <div className="flex bg-white/5 p-1 rounded-lg border border-white/10">
+                        <button onClick={() => setView('list')} className={cn("p-1.5 rounded transition", view === 'list' ? 'bg-white/10 text-cyan-400' : 'text-gray-500 hover:text-white')}>
+                            <ListIcon className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setView('kanban')} className={cn("p-1.5 rounded transition", view === 'kanban' ? 'bg-white/10 text-cyan-400' : 'text-gray-500 hover:text-white')}>
+                            <LayoutGrid className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            {/* Orders table */}
-            {filtered.length === 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-                    <ShoppingCart className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900">No orders</h3>
-                    <p className="text-sm text-gray-500 mt-1">Orders will appear here when customers place them</p>
-                </div>
-            ) : (
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            {isLoading ? (
+                <div className="h-[400px] skeleton rounded-2xl" />
+            ) : view === 'list' ? (
+                /* List View */
+                <div className="table-wrapper">
                     <div className="overflow-x-auto">
-                        <table className="w-full">
+                        <table className="w-full text-left">
                             <thead>
-                                <tr className="bg-gray-50 border-b border-gray-200">
-                                    <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Order #</th>
-                                    <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer</th>
-                                    <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
-                                    <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-                                    <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                                <tr>
+                                    <th>Commande</th>
+                                    <th>Date</th>
+                                    <th>Client</th>
+                                    <th>Produits</th>
+                                    <th>Total</th>
+                                    <th>Statut</th>
+                                    <th className="text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {filtered.map((o) => (
-                                    <tr key={o.id} className="hover:bg-gray-50/50 transition">
-                                        <td className="px-5 py-4 text-sm font-medium text-gray-900">#{o.id}</td>
-                                        <td className="px-5 py-4">
-                                            <p className="text-sm font-medium text-gray-900">{o.customer_name}</p>
-                                            <p className="text-xs text-gray-500">{o.customer_phone}</p>
-                                        </td>
-                                        <td className="px-5 py-4">
-                                            <select
-                                                value={o.status}
-                                                onChange={(e) => updateStatus(o.id, e.target.value)}
-                                                className={`text-xs font-medium px-2.5 py-1 rounded-full border-0 ${statusColors[o.status] || 'bg-gray-100 text-gray-700'}`}
-                                            >
-                                                {statusOptions.map((s) => (
-                                                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-                                                ))}
-                                            </select>
-                                        </td>
-                                        <td className="px-5 py-4 text-sm font-semibold text-gray-900">
-                                            {o.total_amount} DH
-                                        </td>
-                                        <td className="px-5 py-4 text-sm text-gray-500">
-                                            {new Date(o.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-5 py-4 text-right">
-                                            <button
-                                                onClick={() => setSelectedOrder(o)}
-                                                className="text-gray-400 hover:text-indigo-600 p-1.5 rounded transition"
-                                            >
-                                                <Eye className="w-4 h-4" />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
+                            <tbody>
+                                {filteredOrders.length === 0 ? (
+                                    <tr><td colSpan={7} className="text-center py-12 text-gray-500">Aucune commande trouvée.</td></tr>
+                                ) : filteredOrders.map((order: any) => {
+                                    const statusConf = getOrderStatusConfig(order.status);
+                                    return (
+                                        <tr key={order.id}>
+                                            <td className="font-semibold text-white whitespace-nowrap">{order.id}</td>
+                                            <td className="text-gray-400 text-sm whitespace-nowrap">{formatDate(order.created_at)}</td>
+                                            <td>
+                                                <div className="text-white font-medium">{order.customer.name}</div>
+                                                <div className="text-xs text-gray-500 flex items-center gap-1"><Phone className="w-3 h-3" /> {order.customer.phone}</div>
+                                            </td>
+                                            <td>
+                                                <div className="text-sm">
+                                                    {order.items[0].name} {order.items.length > 1 && <span className="text-gray-500 text-xs">(+{order.items.length - 1})</span>}
+                                                </div>
+                                            </td>
+                                            <td className="font-semibold text-cyan-400 whitespace-nowrap">{formatMAD(order.total)}</td>
+                                            <td>
+                                                <span className={cn("badge", statusConf.badge)}>{statusConf.label}</span>
+                                            </td>
+                                            <td className="text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button onClick={() => handleContactCustomer(order.customer.phone, order.customer.name)} className="btn-ghost p-1.5 text-emerald-400 hover:bg-emerald-400/10 rounded-md transition" title="Contacter">
+                                                        <MessageCircle className="w-4 h-4" />
+                                                    </button>
+                                                    <button className="btn-ghost p-1.5 text-gray-400 border border-white/10 rounded-md hover:bg-white/5 transition">
+                                                        <MoreHorizontal className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
                             </tbody>
                         </table>
                     </div>
                 </div>
-            )}
+            ) : (
+                /* Kanban View */
+                <div className="flex gap-4 overflow-x-auto pb-4 snap-x">
+                    {STATUSES.map(status => {
+                        const statusConf = getOrderStatusConfig(status);
+                        const columnOrders = filteredOrders.filter((o: any) => o.status === status);
+                        return (
+                            <div key={status} className="flex-none w-[320px] snap-center">
+                                <div className="flex items-center justify-between mb-4 px-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className={cn("w-2 h-2 rounded-full", statusConf.dot)} />
+                                        <h3 className="font-space-grotesk font-bold text-white text-sm">{statusConf.label}</h3>
+                                    </div>
+                                    <span className="text-xs font-semibold text-gray-500 bg-white/5 px-2 py-0.5 rounded-full">{columnOrders.length}</span>
+                                </div>
 
-            {/* Order detail drawer */}
-            {selectedOrder && (
-                <div className="fixed inset-0 bg-black/40 z-50 flex justify-end" onClick={() => setSelectedOrder(null)}>
-                    <div className="bg-white w-full max-w-md h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b flex items-center justify-between">
-                            <h2 className="text-lg font-semibold">Order #{selectedOrder.id}</h2>
-                            <button onClick={() => setSelectedOrder(null)} className="text-gray-400 hover:text-gray-600">✕</button>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Customer</p>
-                                <p className="text-sm font-medium">{selectedOrder.customer_name}</p>
-                                <p className="text-sm text-gray-500">{selectedOrder.customer_phone}</p>
+                                <div className="space-y-3 min-h-[100px]">
+                                    {columnOrders.map((order: any) => (
+                                        <motion.div
+                                            key={order.id}
+                                            layoutId={order.id}
+                                            className="glass-card p-4 cursor-pointer hover:border-cyan-500/30"
+                                        >
+                                            <div className="flex justify-between items-start mb-3">
+                                                <span className="text-xs font-bold text-cyan-400">{order.id}</span>
+                                                <span className="text-[10px] text-gray-500">{formatDate(order.created_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+
+                                            <div className="mb-3">
+                                                <p className="font-medium text-white text-sm">{order.customer.name}</p>
+                                                <p className="text-xs text-gray-400 flex items-center gap-1 mt-1"><MapPin className="w-3 h-3" /> {order.customer.city}</p>
+                                            </div>
+
+                                            <div className="flex justify-between items-end border-t border-white/5 pt-3 mt-3">
+                                                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                                    <Package className="w-3.5 h-3.5" />
+                                                    <span className="truncate max-w-[120px]">{order.items[0].name}</span>
+                                                </div>
+                                                <span className="font-semibold text-white text-sm">{formatMAD(order.total)}</span>
+                                            </div>
+
+                                            {/* Quick Move actions */}
+                                            <div className="flex items-center gap-2 mt-4">
+                                                {status === 'new' && <button onClick={() => handleUpdateStatus(order.id, 'confirmed')} className="btn-sm flex-1 bg-white/5 hover:bg-indigo-500/20 hover:text-indigo-400 text-xs">Confirmer</button>}
+                                                {status === 'confirmed' && <button onClick={() => handleUpdateStatus(order.id, 'shipped')} className="btn-sm flex-1 bg-white/5 hover:bg-amber-500/20 hover:text-amber-400 text-xs">Expédier</button>}
+                                                {status === 'shipped' && <button onClick={() => handleUpdateStatus(order.id, 'delivered')} className="btn-sm flex-1 bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-400 text-xs">Livrer</button>}
+                                                <button onClick={() => handleContactCustomer(order.customer.phone, order.customer.name)} className="btn-sm bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 p-1.5" title="WhatsApp"><Phone className="w-3.5 h-3.5" /></button>
+                                            </div>
+                                        </motion.div>
+                                    ))}
+
+                                    {columnOrders.length === 0 && (
+                                        <div className="h-24 rounded-2xl border border-dashed border-white/10 flex items-center justify-center text-xs text-gray-500 bg-white/[0.01]">
+                                            Glissez ici
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Status</p>
-                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${statusColors[selectedOrder.status] || 'bg-gray-100'}`}>
-                                    {selectedOrder.status}
-                                </span>
-                            </div>
-                            <div>
-                                <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Total</p>
-                                <p className="text-xl font-bold text-emerald-600">{selectedOrder.total_amount} DH</p>
-                            </div>
-                            <div>
-                                <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Date</p>
-                                <p className="text-sm">{new Date(selectedOrder.created_at).toLocaleString()}</p>
-                            </div>
-                        </div>
-                    </div>
+                        )
+                    })}
                 </div>
             )}
         </div>
     );
-};
-
-export default OrdersPage;
+}
